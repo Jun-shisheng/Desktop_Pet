@@ -1,0 +1,17 @@
+{
+  "name": "@local/dsh-plugin-deepseek-fish-pet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DeepSeek Harness events and balance for DeepSeek Fish Pet",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/balance.js",
+    "LICENSE-CrossPet.txt"
+  ]
+}

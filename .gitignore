@@ -1,0 +1,24 @@
+# 构建输出
+bin/
+obj/
+dist/
+preview/
+
+# 第三方参考代码，不随本仓库分发
+_reference/
+
+# 未定稿的备选素材
+assets/characters/whale_backup/
+
+# 运行时状态
+settings.json
+diagnostics.log
+
+# 测试用的一次性 LOCALAPPDATA，以及安装器留下的备份
+.test-localappdata/
+*.bak-deepseek-fish-pet-*
+
+# IDE
+*.user
+*.suo
+.vs/

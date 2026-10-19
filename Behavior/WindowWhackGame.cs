@@ -28,7 +28,7 @@ public readonly record struct WindowWhackTarget(
 /// </summary>
 public sealed class WindowWhackGame
 {
-    public const double RoundDurationSeconds = 60;
+    public const double RoundDurationSeconds = 10;
     public const double PeekSize = 100;
     public const double PeekOutsidePixels = 82;
 

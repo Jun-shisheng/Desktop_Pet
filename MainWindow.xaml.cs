@@ -150,7 +150,9 @@ public partial class MainWindow : Window
         _brain = new PetBrain(_activityBounds)
         {
             IsPaused = _settings.IsPaused,
-            AllowShortcutPlay = _settings.AllowShortcutPlay && _hasShortcuts
+            AllowShortcutPlay = _settings.AllowShortcutPlay && _hasShortcuts,
+            UseDailyRoutine = _settings.UseDailyRoutine,
+            AllowChatter = _settings.AmbientChatter
         };
         _brain.StateChanged += OnBrainStateChanged;
 
@@ -1039,6 +1041,12 @@ public partial class MainWindow : Window
         PetProp.MusicNote => "♫",
         PetProp.Heart => "♥",
         PetProp.PaperPlane => "✈",
+        PetProp.Broom => "🧹",
+        PetProp.Cloth => "🧽",
+        PetProp.Bubble => "○",
+        PetProp.Ball => "⚽",
+        PetProp.Rice => "🍙",
+        PetProp.Phone => "📱",
         _ => ""
     };
 
@@ -1209,10 +1217,21 @@ public partial class MainWindow : Window
         AddWpfAction(menu, "看书", PetAction.Read);
         AddWpfAction(menu, "喝茶", PetAction.Tea);
         AddWpfAction(menu, "舀一口白饭", PetAction.Sword);
+        AddWpfAction(menu, "喂白饭", PetAction.FeedRice);
+        AddWpfSubmenu(menu, "更多小动作", items =>
+        {
+            AddWpfCommand(items, "唱歌", () => TriggerAction(PetAction.Sing));
+            AddWpfCommand(items, "跳舞", () => TriggerAction(PetAction.Dance));
+            AddWpfCommand(items, "玩球", () => TriggerAction(PetAction.PlayBall));
+            AddWpfCommand(items, "吹泡泡", () => TriggerAction(PetAction.BlowBubbles));
+            AddWpfCommand(items, "看星星", () => TriggerAction(PetAction.Stargaze));
+            AddWpfCommand(items, "扫地", () => TriggerAction(PetAction.Sweep));
+        });
         AddWpfCommand(menu, "跳到下一图标", TriggerIconHop);
         AddWpfCommand(menu, "折纸飞机飞过去", TriggerPaperPlane);
         AddWpfAction(menu, "和快捷方式玩耍", PetAction.Shortcut);
         AddWpfAction(menu, "欢呼", PetAction.Cheer);
+        menu.Items.Add(new MenuItem { Header = StatusText(), IsEnabled = false });
         menu.Items.Add(new Separator());
         AddWpfToggle(menu, "暂停活动", _settings.IsPaused, SetPaused);
         AddWpfToggle(menu, "平时置顶（站图标时除外）", _settings.AlwaysOnTop, SetAlwaysOnTop);
@@ -1221,10 +1240,12 @@ public partial class MainWindow : Window
         AddWpfToggle(menu, "显示 DeepSeek 余额", _settings.ShowDeepSeekBalance, SetShowDeepSeekBalance);
         AddWpfToggle(menu, "允许快捷方式分身互动", _settings.AllowShortcutPlay, SetShortcutPlay);
         AddWpfToggle(menu, "偶尔从窗口边缘探头", _settings.AmbientWindowPeek, SetAmbientWindowPeek);
+        AddWpfToggle(menu, "按作息时间活动", _settings.UseDailyRoutine, SetUseDailyRoutine);
+        AddWpfToggle(menu, "偶尔自言自语", _settings.AmbientChatter, SetAmbientChatter);
         menu.Items.Add(new Separator());
         AddWpfMode(menu, "生活模式", PetMode.Life);
         AddWpfMode(menu, "图标跳一跳", PetMode.IconJump);
-        AddWpfMode(menu, "窗口打地鼠（60 秒）", PetMode.WindowWhack);
+        AddWpfMode(menu, "窗口打地鼠（10 秒）", PetMode.WindowWhack);
         if (_whack.IsActive)
             menu.Items.Add(new MenuItem { Header = $"命中 {_whack.Score} · 剩余 {Math.Ceiling(_whack.TimeRemaining)} 秒", IsEnabled = false });
         menu.Items.Add(new Separator());
@@ -1235,12 +1256,27 @@ public partial class MainWindow : Window
     private void AddWpfAction(ContextMenu menu, string title, PetAction action) =>
         AddWpfCommand(menu, title, () => TriggerAction(action));
 
-    private static void AddWpfCommand(ContextMenu menu, string title, Action callback)
+    private static void AddWpfCommand(ContextMenu menu, string title, Action callback) =>
+        AddWpfCommand(menu.Items, title, callback);
+
+    private static void AddWpfCommand(ItemCollection items, string title, Action callback)
     {
         var item = new MenuItem { Header = title };
         item.Click += (_, _) => callback();
+        items.Add(item);
+    }
+
+    private static void AddWpfSubmenu(ContextMenu menu, string title,
+        Action<ItemCollection> populate)
+    {
+        var item = new MenuItem { Header = title };
+        populate(item.Items);
         menu.Items.Add(item);
     }
+
+    private string StatusText() =>
+        $"状态：{_brain.CurrentStateName} · 饱食 {Math.Round((1 - _brain.Hunger) * 100)}%" +
+        $" · 精力 {Math.Round(_brain.Energy * 100)}% · 心情 {Math.Round(_brain.Mood * 100)}%";
 
     private static void AddWpfToggle(ContextMenu menu, string title, bool value, Action<bool> callback)
     {
@@ -1265,9 +1301,20 @@ public partial class MainWindow : Window
         AddTrayAction("看书", PetAction.Read);
         AddTrayAction("喝茶", PetAction.Tea);
         AddTrayAction("舀一口白饭", PetAction.Sword);
+        AddTrayAction("喂白饭", PetAction.FeedRice);
+        AddTraySubmenu("更多小动作", items =>
+        {
+            AddTrayCommand(items, "唱歌", () => TriggerAction(PetAction.Sing));
+            AddTrayCommand(items, "跳舞", () => TriggerAction(PetAction.Dance));
+            AddTrayCommand(items, "玩球", () => TriggerAction(PetAction.PlayBall));
+            AddTrayCommand(items, "吹泡泡", () => TriggerAction(PetAction.BlowBubbles));
+            AddTrayCommand(items, "看星星", () => TriggerAction(PetAction.Stargaze));
+            AddTrayCommand(items, "扫地", () => TriggerAction(PetAction.Sweep));
+        });
         AddTrayCommand("跳到下一图标", TriggerIconHop);
         AddTrayCommand("折纸飞机飞过去", TriggerPaperPlane);
         AddTrayAction("和快捷方式玩耍", PetAction.Shortcut);
+        _trayMenu.Items.Add(new Forms.ToolStripMenuItem(StatusText()) { Enabled = false });
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         AddTrayToggle("暂停活动", _settings.IsPaused, SetPaused);
         AddTrayToggle("平时置顶（站图标时除外）", _settings.AlwaysOnTop, SetAlwaysOnTop);
@@ -1276,10 +1323,12 @@ public partial class MainWindow : Window
         AddTrayToggle("显示 DeepSeek 余额", _settings.ShowDeepSeekBalance, SetShowDeepSeekBalance);
         AddTrayToggle("允许快捷方式分身互动", _settings.AllowShortcutPlay, SetShortcutPlay);
         AddTrayToggle("偶尔从窗口边缘探头", _settings.AmbientWindowPeek, SetAmbientWindowPeek);
+        AddTrayToggle("按作息时间活动", _settings.UseDailyRoutine, SetUseDailyRoutine);
+        AddTrayToggle("偶尔自言自语", _settings.AmbientChatter, SetAmbientChatter);
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         AddTrayMode("生活模式", PetMode.Life);
         AddTrayMode("图标跳一跳", PetMode.IconJump);
-        AddTrayMode("窗口打地鼠（60 秒）", PetMode.WindowWhack);
+        AddTrayMode("窗口打地鼠（10 秒）", PetMode.WindowWhack);
         if (_whack.IsActive)
             _trayMenu.Items.Add(new Forms.ToolStripMenuItem(
                 $"命中 {_whack.Score} · 剩余 {Math.Ceiling(_whack.TimeRemaining)} 秒") { Enabled = false });
@@ -1291,10 +1340,22 @@ public partial class MainWindow : Window
     private void AddTrayAction(string title, PetAction action) =>
         AddTrayCommand(title, () => TriggerAction(action));
 
-    private void AddTrayCommand(string title, Action callback)
+    private void AddTrayCommand(string title, Action callback) =>
+        AddTrayCommand(_trayMenu.Items, title, callback);
+
+    private void AddTrayCommand(Forms.ToolStripItemCollection items, string title,
+        Action callback)
     {
         var item = new Forms.ToolStripMenuItem(title);
         item.Click += (_, _) => Dispatcher.BeginInvoke(callback);
+        items.Add(item);
+    }
+
+    private void AddTraySubmenu(string title,
+        Action<Forms.ToolStripItemCollection> populate)
+    {
+        var item = new Forms.ToolStripMenuItem(title);
+        populate(item.DropDownItems);
         _trayMenu.Items.Add(item);
     }
 
@@ -1758,6 +1819,20 @@ public partial class MainWindow : Window
             EndAmbientPeek();
         else
             ScheduleAmbientPeek();
+        _settings.Save();
+    }
+
+    private void SetUseDailyRoutine(bool value)
+    {
+        _settings.UseDailyRoutine = value;
+        _brain.UseDailyRoutine = value;
+        _settings.Save();
+    }
+
+    private void SetAmbientChatter(bool value)
+    {
+        _settings.AmbientChatter = value;
+        _brain.AllowChatter = value;
         _settings.Save();
     }
 

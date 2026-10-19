@@ -14,27 +14,33 @@ public enum PetPose
 public enum PetProp
 {
     None, Sword, FishingRod, Fish, TeaCup, Book, Shortcut, Pillow,
-    Sparkle, Question, MusicNote, Heart, PaperPlane
+    Sparkle, Question, MusicNote, Heart, PaperPlane,
+    Broom, Cloth, Bubble, Ball, Rice, Phone
 }
 
 public enum PetAction
 {
     Pet, DoubleClick, DragStart, DragEnd, Call, Fish, Nap, Read, Tea, Sword,
     Shortcut, Wave, Cheer, Pause, Resume, IconHop, PaperPlane, ShakeSpit,
-    AbortIconSnack
+    AbortIconSnack, FeedRice, Sweep, Sing, Dance, PlayBall, BlowBubbles,
+    Stargaze
 }
 
 public enum PetState
 {
     Stand, Blink, LookLeft, LookRight, TiltHead, AdjustRibbon, CheckArmor,
     CheckSword, Sway, Hum, Think, Smile, Pout, Salute, Nod, Yawn,
+    MorningStretch, Sneeze, Sigh,
     WalkLeft, WalkRight, RunLeft, RunRight, SprintLeft, SprintRight,
     TiptoeLeft, TiptoeRight, HopLeft, HopRight, SkipLeft, SkipRight,
-    DashLeft, DashRight, Slide, TurnAround, Stumble, Recover,
+    DashLeft, DashRight, Slide, SweepLeft, SweepRight, TurnAround,
+    Stumble, Recover,
     Sit, Stretch, LieDown, Nap, Dream, Wake, RollOver, TeaBreak,
     ReadBook, FishCast, FishWait, FishBite, FishReel, FishCelebrate,
     Wave, Bow, Spin, Cheer, SwordPose, SwordSwing, SwordSheathe,
     PetHappy, PetShy, PetAnnoyed, Laugh, Sparkle,
+    Daydream, Stargaze, Sunbathe, Sing, Dance, PlayBall, ChaseTail,
+    BlowBubbles, PhoneScroll, WipeDesk, CookRice, EatRice, RiceStuffed,
     PickShortcut, CarryShortcut, InspectShortcut, ReturnShortcut,
     ClimbLeft, ClimbRight, Hang, Drop, Land, Dragged,
     IconApproach, IconJump, IconLand, IconInspect, IconNibble, IconClimb, IconHang,
@@ -87,7 +93,11 @@ public sealed class PetBrain
     private double _motionEndY;
     private double _hopHeight;
     private double _hunger = 0.2;
+    private double _mood = 0.72;
     private double _iconSnackRetrySeconds;
+    private double _chatterSeconds;
+    private double _chatterRemaining;
+    private string _chatter = "";
     // The UI owns the swallowed visuals and their masks. The brain only needs
     // their IDs to avoid eating the same desktop icon again before a spit.
     private readonly HashSet<string> _storedSnackIconIds = new(StringComparer.OrdinalIgnoreCase);
@@ -98,6 +108,7 @@ public sealed class PetBrain
     public PetBrain(Rect bounds, int? seed = null)
     {
         _random = seed is null ? new Random() : new Random(seed.Value);
+        _chatterSeconds = 90 + _random.NextDouble() * 150;
         _bounds = bounds;
         _x = Math.Clamp(bounds.Left + bounds.Width * 0.66, bounds.Left, MaxX);
         _y = GroundY;
@@ -105,8 +116,16 @@ public sealed class PetBrain
     }
 
     public PetState CurrentState => _state;
+    public string CurrentStateName => Info[_state].Name;
+    public double Hunger => _hunger;
+    public double Energy => _energy;
+    public double Mood => _mood;
     public bool IsPaused { get; set; }
     public bool AllowShortcutPlay { get; set; } = true;
+    /// <summary>Bias autonomous activities toward morning, noon, evening, and night.</summary>
+    public bool UseDailyRoutine { get; set; } = true;
+    /// <summary>Occasionally speak a line tied to the time of day, hunger, or mood.</summary>
+    public bool AllowChatter { get; set; } = true;
     public bool IsIconAdventureActive { get; private set; }
     public bool IsWaitingForBridge => IsIconAdventureActive && _state == PetState.IconWaitForBridge;
     public bool IsLifePerched => !IsIconAdventureActive && _lifePerchIconId is not null;
@@ -542,9 +561,11 @@ public sealed class PetBrain
         switch (action)
         {
             case PetAction.Pet:
+                _mood = Math.Min(1, _mood + 0.1);
                 StartSequence(Pick(PetState.PetHappy, PetState.PetShy, PetState.PetAnnoyed), PetState.Smile);
                 break;
             case PetAction.DoubleClick:
+                _mood = Math.Min(1, _mood + 0.05);
                 StartSequence(PetState.Spin, PetState.Cheer, PetState.Sparkle);
                 break;
             case PetAction.Call:
@@ -574,6 +595,24 @@ public sealed class PetBrain
                 break;
             case PetAction.Wave: StartSequence(PetState.Wave, PetState.Bow); break;
             case PetAction.Cheer: StartSequence(PetState.Cheer, PetState.Sparkle); break;
+            case PetAction.FeedRice:
+                if (IsIconAdventureActive || _eatenIconPlatform.HasValue) return;
+                _hunger = 0.05;
+                _mood = Math.Min(1, _mood + 0.08);
+                StartSequence(PetState.CookRice, PetState.EatRice, PetState.RiceStuffed);
+                break;
+            case PetAction.Sweep:
+                StartSequence(Pick(PetState.SweepLeft, PetState.SweepRight), PetState.WipeDesk);
+                break;
+            case PetAction.Sing: StartSequence(PetState.Sing, PetState.Smile); break;
+            case PetAction.Dance: StartSequence(PetState.Dance, PetState.Cheer); break;
+            case PetAction.PlayBall: StartSequence(PetState.PlayBall, PetState.Cheer); break;
+            case PetAction.BlowBubbles:
+                StartSequence(PetState.BlowBubbles, PetState.ChaseTail);
+                break;
+            case PetAction.Stargaze:
+                StartSequence(PetState.Sit, PetState.Stargaze, PetState.Smile);
+                break;
         }
     }
 
@@ -593,11 +632,58 @@ public sealed class PetBrain
             _iconSnackRetrySeconds = Math.Max(0, _iconSnackRetrySeconds - dt);
             if (!IsIconAdventureActive && !_eatenIconPlatform.HasValue &&
                 _state is not PetState.IconHungry and not PetState.IconSeekSnack and not PetState.IconEat)
-                _hunger = Math.Min(1, _hunger + dt * 0.027);
+                _hunger = Math.Min(1, _hunger + dt * 0.008);
+            _mood = Math.Max(0, _mood - dt * 0.0007);
+            UpdateChatter(dt);
             Move(dt);
             if (_elapsed >= _duration) Advance();
         }
         return BuildFrame();
+    }
+
+    private void UpdateChatter(double dt)
+    {
+        _chatterRemaining = Math.Max(0, _chatterRemaining - dt);
+        if (!AllowChatter) return;
+        _chatterSeconds -= dt;
+        if (_chatterSeconds > 0) return;
+        if (!CanChatter())
+        {
+            _chatterSeconds = 15;
+            return;
+        }
+        _chatter = PickChatter();
+        _chatterRemaining = 3.2;
+        _chatterSeconds = 110 + _random.NextDouble() * 190;
+    }
+
+    private bool CanChatter() =>
+        !IsIconAdventureActive && !_eatenIconPlatform.HasValue && _speechTime <= 0 &&
+        _state is (PetState.Stand or PetState.Blink or PetState.LookLeft or
+            PetState.LookRight or PetState.TiltHead or PetState.Sway or PetState.Hum or
+            PetState.Think or PetState.Smile or PetState.Sit or PetState.Daydream or
+            PetState.Stargaze or PetState.Sunbathe or PetState.PhoneScroll or
+            PetState.BlowBubbles or PetState.TeaBreak or PetState.ReadBook or
+            PetState.MorningStretch);
+
+    private string PickChatter()
+    {
+        if (_hunger >= 0.85)
+            return Pick("肚子咕咕叫了……有白饭吗？", "好饿呀，想吃白饭……");
+        if (_mood <= 0.25)
+            return Pick("有点无聊……陪我说说话嘛", "唉……今天好像没什么精神", "摸摸头会让我开心哦");
+        if (_mood >= 0.85)
+            return Pick("今天心情特别好！", "转个圈给你看~", "和你在一起真开心！");
+        int hour = DateTime.Now.Hour;
+        if (hour is >= 5 and < 11)
+            return Pick("早上好！今天也要加油~", "白饭在锅里咕嘟咕嘟~", "伸个懒腰，开始新的一天！");
+        if (hour is >= 11 and < 14)
+            return Pick("到饭点啦，今天吃白饭吗？", "一起摸鱼休息一下吧~", "肚子有点饿了呢");
+        if (hour is >= 14 and < 18)
+            return Pick("喝杯茶休息一下吧", "桌面好干净呀，是我扫的！", "DeepSeek 在忙什么呢？");
+        if (hour is >= 18 and < 22)
+            return Pick("今天辛苦啦~", "晚上想吃点什么？", "一起看会儿星星吧");
+        return Pick("夜深了，记得早点睡哦~", "我陪你到这么晚呀", "窗外好安静……");
     }
 
     private void Move(double dt)
@@ -642,6 +728,8 @@ public sealed class PetBrain
             PetState.DashLeft => -112,
             PetState.DashRight => 112,
             PetState.Slide => _faceLeft ? -48 : 48,
+            PetState.SweepLeft => -22,
+            PetState.SweepRight => 22,
             PetState.CarryShortcut => _faceLeft ? -18 : 18,
             _ => 0
         };
@@ -654,16 +742,20 @@ public sealed class PetBrain
             {
                 _x = _bounds.Left;
                 if (velocity < 0 && _sequence.Count == 0 && _elapsed > 0.2)
-                    StartSequence(PetState.TurnAround, PetState.WalkRight);
+                    StartSequence(PetState.TurnAround,
+                        _state == PetState.SweepLeft ? PetState.SweepRight : PetState.WalkRight);
             }
             else if (_x >= MaxX)
             {
                 _x = MaxX;
                 if (velocity > 0 && _sequence.Count == 0 && _elapsed > 0.2)
-                    StartSequence(PetState.TurnAround, PetState.WalkLeft);
+                    StartSequence(PetState.TurnAround,
+                        _state == PetState.SweepRight ? PetState.SweepLeft : PetState.WalkLeft);
             }
         }
-        else if (_state is PetState.Sit or PetState.Nap or PetState.TeaBreak or PetState.ReadBook or PetState.FishWait)
+        else if (_state is PetState.Sit or PetState.Nap or PetState.TeaBreak or
+                 PetState.ReadBook or PetState.FishWait or PetState.Daydream or
+                 PetState.Stargaze or PetState.Sunbathe or PetState.PhoneScroll)
         {
             _energy = Math.Min(1, _energy + dt * 0.025);
         }
@@ -768,23 +860,35 @@ public sealed class PetBrain
             ? PetPose.Climb : info.Pose;
         double p = _duration <= 0 ? 0 : Math.Clamp(_elapsed / _duration, 0, 1);
         double beat = Math.Sin(_elapsed * Math.PI * 4);
-        double bob = info.Pose switch
+        double bob = _state switch
         {
-            PetPose.Walk => -Math.Abs(beat) * 0.8,
-            PetPose.Run => -Math.Abs(Math.Sin(_elapsed * Math.PI * 8)) * 1.1,
-            PetPose.Tiptoe => -Math.Abs(beat) * 0.4,
-            PetPose.Jump when IsIconAdventureActive => 0,
-            PetPose.Jump => -Math.Abs(Math.Sin(p * Math.PI *
-                (_state is PetState.SkipLeft or PetState.SkipRight ? 2 : 1))) * 25,
-            PetPose.Cheer => -Math.Abs(Math.Sin(_elapsed * Math.PI * 6)) * 4,
-            PetPose.Sleep => Math.Sin(_elapsed * 2) * 0.8,
-            PetPose.Fish => Math.Sin(_elapsed * 2.5) * 0.7,
-            _ => 0
+            PetState.PlayBall => -Math.Abs(Math.Sin(_elapsed * Math.PI * 3)) * 18,
+            PetState.Dance => -Math.Abs(Math.Sin(_elapsed * Math.PI * 5)) * 5,
+            PetState.Sing => -Math.Abs(Math.Sin(_elapsed * 3)) * 1.5,
+            PetState.BlowBubbles => Math.Sin(_elapsed * 2) * 0.8,
+            PetState.Sneeze => -Math.Abs(Math.Sin(p * Math.PI)) * 3,
+            _ => info.Pose switch
+            {
+                PetPose.Walk => -Math.Abs(beat) * 0.8,
+                PetPose.Run => -Math.Abs(Math.Sin(_elapsed * Math.PI * 8)) * 1.1,
+                PetPose.Tiptoe => -Math.Abs(beat) * 0.4,
+                PetPose.Jump when IsIconAdventureActive => 0,
+                PetPose.Jump => -Math.Abs(Math.Sin(p * Math.PI *
+                    (_state is PetState.SkipLeft or PetState.SkipRight ? 2 : 1))) * 25,
+                PetPose.Cheer => -Math.Abs(Math.Sin(_elapsed * Math.PI * 6)) * 4,
+                PetPose.Sleep => Math.Sin(_elapsed * 2) * 0.8,
+                PetPose.Fish => Math.Sin(_elapsed * 2.5) * 0.7,
+                _ => 0
+            }
         };
         double rotation = _state switch
         {
             PetState.Spin => 360 * p,
             PetState.RollOver => 360 * p,
+            PetState.ChaseTail => 360 * p,
+            PetState.Dance => 12 * Math.Sin(_elapsed * 4),
+            PetState.Sneeze => 4 * Math.Sin(p * Math.PI * 2),
+            PetState.BlowBubbles => 2 * Math.Sin(_elapsed * 2),
             PetState.Stumble => 22 * Math.Sin(p * Math.PI),
             PetState.Bow => 18 * Math.Sin(p * Math.PI),
             PetState.CheckArmor => 6 * Math.Sin(p * Math.PI),
@@ -805,8 +909,11 @@ public sealed class PetBrain
         double scale = _state switch
         {
             PetState.Land => 1 - 0.12 * Math.Sin(p * Math.PI),
-            PetState.Stretch => 1 + 0.07 * Math.Sin(p * Math.PI),
+            PetState.Stretch or PetState.MorningStretch => 1 + 0.07 * Math.Sin(p * Math.PI),
             PetState.Cheer => 1 + 0.05 * Math.Abs(Math.Sin(_elapsed * 8)),
+            PetState.Dance => 1 + 0.04 * Math.Abs(Math.Sin(_elapsed * 5)),
+            PetState.PlayBall => 1 + 0.03 * Math.Abs(Math.Sin(_elapsed * Math.PI * 3)),
+            PetState.Sneeze => 1 + 0.05 * Math.Sin(p * Math.PI * 3),
             PetState.Dream => 1 + 0.025 * Math.Sin(_elapsed * 2),
             _ => 1
         };
@@ -816,7 +923,8 @@ public sealed class PetBrain
             ? "搭一座图标桥，我才能继续跳！"
             : _state == PetState.IconStuffed
                 ? "吃撑啦，抓住我摇一摇！"
-                : _speechTime > 0 ? _speech : "";
+                : _speechTime > 0 ? _speech
+                : _chatterRemaining > 0 ? _chatter : "";
         return new PetFrame(_x, _y + bob, scale, rotation, _faceLeft,
             pose, info.Prop, speech, info.Name, bob, opacity, p);
     }
@@ -1328,6 +1436,40 @@ public sealed class PetBrain
             Enter(PetState.IconHungry);
             return;
         }
+        if (_hunger >= 0.85 && _iconSnackRetrySeconds <= 0 &&
+            !_iconPlatforms.Values.Any(IsAvailableSnack))
+        {
+            // No edible shortcut is visible, so she makes her own rice.
+            _hunger = 0.05;
+            StartSequence(PetState.CookRice, PetState.EatRice, PetState.RiceStuffed);
+            return;
+        }
+        if (UseDailyRoutine && _random.NextDouble() < 0.3 &&
+            PickRoutineState() is PetState routine)
+        {
+            StartRoutineState(routine);
+            return;
+        }
+        if (_mood <= 0.28 && _random.NextDouble() < 0.4)
+        {
+            Enter(Pick(PetState.Sigh, PetState.Pout, PetState.Daydream,
+                PetState.Sit, PetState.Stargaze));
+            return;
+        }
+        if (_mood >= 0.78 && _random.NextDouble() < 0.3)
+        {
+            StartSequence(Pick(PetState.Dance, PetState.Sing, PetState.PlayBall,
+                PetState.BlowBubbles, PetState.ChaseTail), PetState.Cheer);
+            return;
+        }
+        if (_random.NextDouble() < 0.05)
+        {
+            if (_random.NextDouble() < 0.65)
+                Trigger(PetAction.Sweep);
+            else
+                Enter(PetState.WipeDesk);
+            return;
+        }
         double r = _random.NextDouble();
         if (AllowShortcutPlay && r < 0.025)
         {
@@ -1390,9 +1532,52 @@ public sealed class PetBrain
             PetState.Stand, PetState.Blink, PetState.LookLeft, PetState.LookRight,
             PetState.TiltHead, PetState.AdjustRibbon, PetState.CheckArmor,
             PetState.CheckSword, PetState.Sway, PetState.Hum, PetState.Think,
-            PetState.Smile, PetState.Pout, PetState.Salute, PetState.Nod, PetState.Yawn
+            PetState.Smile, PetState.Pout, PetState.Salute, PetState.Nod, PetState.Yawn,
+            PetState.Daydream, PetState.PhoneScroll, PetState.BlowBubbles,
+            PetState.Sneeze
         ];
         Enter(idle[_random.Next(idle.Length)]);
+    }
+
+    /// <summary>Pick an activity that fits the current time of day, or null for no bias.</summary>
+    private PetState? PickRoutineState()
+    {
+        int hour = DateTime.Now.Hour;
+        if (hour is >= 5 and < 11)
+            return Pick(PetState.MorningStretch, PetState.Hum,
+                _hunger > 0.45 ? PetState.CookRice : PetState.Sunbathe, PetState.Blink);
+        if (hour is >= 11 and < 14)
+            return Pick(_hunger > 0.4 ? PetState.CookRice : PetState.TeaBreak,
+                PetState.Sit, PetState.BlowBubbles, PetState.Sing);
+        if (hour is >= 14 and < 18)
+            return Pick(PetState.TeaBreak, PetState.ReadBook, PetState.WipeDesk,
+                PetState.PhoneScroll, PetState.Sing);
+        if (hour is >= 18 and < 22)
+            return Pick(PetState.Stargaze, PetState.TeaBreak, PetState.ReadBook,
+                PetState.Smile, PetState.Dance);
+        return Pick(PetState.Yawn, PetState.Nap, PetState.Stargaze,
+            PetState.Dream, PetState.LieDown);
+    }
+
+    private void StartRoutineState(PetState state)
+    {
+        switch (state)
+        {
+            case PetState.CookRice:
+                _hunger = 0.05;
+                StartSequence(PetState.CookRice, PetState.EatRice, PetState.RiceStuffed);
+                break;
+            case PetState.Nap or PetState.LieDown:
+                StartSequence(PetState.Yawn, PetState.LieDown, PetState.Nap,
+                    PetState.Dream, PetState.Wake);
+                break;
+            case PetState.MorningStretch:
+                StartSequence(PetState.Yawn, PetState.MorningStretch, PetState.Hum);
+                break;
+            default:
+                Enter(state);
+                break;
+        }
     }
 
     private bool IsAvailableSnack(IconPlatform icon) =>
@@ -1420,6 +1605,8 @@ public sealed class PetBrain
 
     private PetState Pick(params PetState[] values) => values[_random.Next(values.Length)];
 
+    private string Pick(params string[] values) => values[_random.Next(values.Length)];
+
     private void StartSequence(params PetState[] states)
     {
         if (states.Length == 0) return;
@@ -1437,11 +1624,29 @@ public sealed class PetBrain
         if (state == PetState.Dragged) _duration = double.MaxValue;
         if (state == PetState.IconFall) _motionStartY = _y;
         if (state is PetState.WalkLeft or PetState.RunLeft or PetState.SprintLeft or
-            PetState.TiptoeLeft or PetState.HopLeft or PetState.SkipLeft or PetState.DashLeft)
+            PetState.TiptoeLeft or PetState.HopLeft or PetState.SkipLeft or
+            PetState.DashLeft or PetState.SweepLeft)
             _faceLeft = true;
         if (state is PetState.WalkRight or PetState.RunRight or PetState.SprintRight or
-            PetState.TiptoeRight or PetState.HopRight or PetState.SkipRight or PetState.DashRight)
+            PetState.TiptoeRight or PetState.HopRight or PetState.SkipRight or
+            PetState.DashRight or PetState.SweepRight)
             _faceLeft = false;
+        // Mood follows what the pet is doing, not only player interaction.
+        if (state is PetState.Cheer or PetState.PetHappy or PetState.Laugh or
+            PetState.Dance or PetState.Sing or PetState.PlayBall or
+            PetState.Sparkle or PetState.FishCelebrate)
+            _mood = Math.Min(1, _mood + 0.012);
+        if (state is PetState.Pout or PetState.PetAnnoyed or PetState.Sigh or
+            PetState.Stumble)
+            _mood = Math.Max(0, _mood - 0.008);
+        if (state == PetState.Dream)
+            _mood = Math.Min(1, _mood + 0.01);
+        if (state == PetState.RiceStuffed)
+        {
+            _hunger = 0.05;
+            _mood = Math.Min(1, _mood + 0.1);
+        }
+        _chatterRemaining = 0;
         _speech = info.Speech;
         _speechTime = string.IsNullOrEmpty(_speech) ? 0 : Math.Min(2, _duration);
         StateChanged?.Invoke(state);
@@ -1476,6 +1681,9 @@ public sealed class PetBrain
         Add(PetState.Salute, "敬礼", PetPose.Wave, min: 0.8, max: 1.3);
         Add(PetState.Nod, "点头", min: 0.5, max: 1);
         Add(PetState.Yawn, "打哈欠", PetPose.Stretch, min: 1, max: 1.7, speech: "哈啊……");
+        Add(PetState.MorningStretch, "早安伸展", PetPose.Stretch, min: 1.3, max: 2.1, speech: "早上好~");
+        Add(PetState.Sneeze, "打喷嚏", min: 0.6, max: 1, speech: "阿嚏！");
+        Add(PetState.Sigh, "叹气", min: 1.2, max: 2, speech: "唉……");
 
         Add(PetState.WalkLeft, "向左散步", PetPose.Walk, min: 1.5, max: 3.4);
         Add(PetState.WalkRight, "向右散步", PetPose.Walk, min: 1.5, max: 3.4);
@@ -1492,6 +1700,8 @@ public sealed class PetBrain
         Add(PetState.DashLeft, "向左疾走", PetPose.Run, min: 0.6, max: 1);
         Add(PetState.DashRight, "向右疾走", PetPose.Run, min: 0.6, max: 1);
         Add(PetState.Slide, "滑步", PetPose.Run, min: 0.7, max: 1.1);
+        Add(PetState.SweepLeft, "向左扫地", PetPose.Walk, PetProp.Broom, 1.8, 3);
+        Add(PetState.SweepRight, "向右扫地", PetPose.Walk, PetProp.Broom, 1.8, 3);
         Add(PetState.TurnAround, "转身", min: 0.4, max: 0.7);
         Add(PetState.Stumble, "绊了一下", PetPose.Fall, min: 0.5, max: 0.8, speech: "哎呀！");
         Add(PetState.Recover, "站稳", PetPose.Stand, min: 0.5, max: 0.8);
@@ -1523,6 +1733,19 @@ public sealed class PetBrain
         Add(PetState.PetAnnoyed, "被摸头闹别扭", PetPose.Stand, min: 0.9, max: 1.5, speech: "别闹啦！");
         Add(PetState.Laugh, "笑出声", PetPose.Cheer, min: 0.9, max: 1.5, speech: "哈哈！");
         Add(PetState.Sparkle, "闪亮登场", PetPose.Cheer, PetProp.Sparkle, 0.9, 1.5);
+        Add(PetState.Daydream, "发呆", PetPose.Sit, PetProp.Question, 2.5, 4.5, "……");
+        Add(PetState.Stargaze, "看星星", PetPose.Sit, PetProp.Sparkle, 3, 5, "星星真好看~");
+        Add(PetState.Sunbathe, "晒太阳", PetPose.Lie, PetProp.Sparkle, 3, 5, "暖洋洋的~");
+        Add(PetState.Sing, "唱歌", PetPose.Cheer, PetProp.MusicNote, 2.4, 4, "♪ 白饭白饭~");
+        Add(PetState.Dance, "跳舞", PetPose.Spin, PetProp.MusicNote, 2, 3.2, "一起跳舞吧！");
+        Add(PetState.PlayBall, "玩球", PetPose.Jump, PetProp.Ball, 1.8, 3, "接住！");
+        Add(PetState.ChaseTail, "追尾巴", PetPose.Spin, min: 1.2, max: 2, speech: "转呀转~");
+        Add(PetState.BlowBubbles, "吹泡泡", PetPose.Stand, PetProp.Bubble, 2.4, 4, "啵~");
+        Add(PetState.PhoneScroll, "刷手机", PetPose.Sit, PetProp.Phone, 2.5, 4.5, "嘿嘿…");
+        Add(PetState.WipeDesk, "擦桌面", PetPose.Carry, PetProp.Cloth, 2, 3.4, "擦得亮亮的~");
+        Add(PetState.CookRice, "淘米煮饭", PetPose.Sword, PetProp.Rice, 2, 3.4, "今天也要好好吃饭！");
+        Add(PetState.EatRice, "吃白饭", PetPose.Sword, PetProp.Rice, 1.4, 2.4, "啊呜~ 好吃！");
+        Add(PetState.RiceStuffed, "吃饱啦", PetPose.Sit, PetProp.Heart, 2.2, 3.4, "吃饱啦~");
 
         Add(PetState.PickShortcut, "拿起快捷方式分身", PetPose.Carry, PetProp.Shortcut, 0.9, 1.4, "借我看看~");
         Add(PetState.CarryShortcut, "搬运快捷方式分身", PetPose.Carry, PetProp.Shortcut, 2, 3.2);

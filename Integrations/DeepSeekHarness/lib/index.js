@@ -123,7 +123,7 @@ export function apply(ctx, config = {}) {
   }
 
   function pollBalance() {
-    if (config.balanceEnabled === false) return Promise.resolve();
+    if (config.balanceEnabled !== true) return Promise.resolve();
     if (balanceInFlight) return balanceInFlight;
     lastPollAt = Date.now();
     balanceInFlight = (async () => {
@@ -201,7 +201,7 @@ export function apply(ctx, config = {}) {
     }
   });
 
-  if (config.balanceEnabled !== false) {
+  if (config.balanceEnabled === true) {
     // Optional services must not block the state listener when they are absent.
     ctx.inject?.(["deepseekAccount"], (sub) => {
       account = sub.deepseekAccount;

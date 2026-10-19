@@ -20,7 +20,8 @@ const ctx = {
   get: () => undefined,
   logger: { warn: () => {} },
 };
-apply(ctx, { balanceEnabled: false });
+// The default integration observes work events without querying account balance.
+apply(ctx);
 assert.equal(name, "deepseek-fish-pet");
 const file = join(process.env.LOCALAPPDATA, "DeepSeekFishPet", "state", "deepseek-state.json");
 const next = async () => "ok";

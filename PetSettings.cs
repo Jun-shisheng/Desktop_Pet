@@ -15,6 +15,8 @@ public sealed class PetSettings
     public bool AmbientWindowPeek { get; set; } = true;
     public bool FollowDeepSeekActivity { get; set; } = true;
     public bool ShowDeepSeekBalance { get; set; }
+    public bool UseDailyRoutine { get; set; } = true;
+    public bool AmbientChatter { get; set; } = true;
     public PetMode Mode { get; set; } = PetMode.Life;
 
     private static string SettingsPath => Path.Combine(
